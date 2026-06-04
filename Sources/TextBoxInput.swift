@@ -3420,12 +3420,19 @@ struct TextBoxInputView: NSViewRepresentable {
             let nextText = textView.plainText()
             let nextAttachments = textView.inlineAttachments()
             let nextHasPendingAttachmentUpload = textView.hasPendingAttachmentUploadPlaceholder()
-            let contentChanged = parent.text != nextText
-                || parent.attachments.map(\.id) != nextAttachments.map(\.id)
-                || parent.hasPendingAttachmentUpload != nextHasPendingAttachmentUpload
-            parent.text = nextText
-            parent.attachments = nextAttachments
-            parent.hasPendingAttachmentUpload = nextHasPendingAttachmentUpload
+            let didChangeText = parent.text != nextText
+            let didChangeAttachments = parent.attachments.map(\.id) != nextAttachments.map(\.id)
+            let didChangePendingUpload = parent.hasPendingAttachmentUpload != nextHasPendingAttachmentUpload
+            let contentChanged = didChangeText || didChangeAttachments || didChangePendingUpload
+            if didChangeText {
+                parent.text = nextText
+            }
+            if didChangeAttachments {
+                parent.attachments = nextAttachments
+            }
+            if didChangePendingUpload {
+                parent.hasPendingAttachmentUpload = nextHasPendingAttachmentUpload
+            }
             if contentChanged {
                 parent.onContentChanged()
             }
