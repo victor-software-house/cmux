@@ -683,11 +683,11 @@ final class AgentSessionAutoResumeSettingsTests: XCTestCase {
             )
         }
 
-        // Back-compat: with no working directory, no extra outer cd is emitted.
+        // With no persisted working directory, fall back to HOME instead of inheriting the launcher cwd.
         let bare = TerminalStartupReturnShellScript
             .commandThenReturnLines(command: "echo hi")
             .joined(separator: "\n")
-        XCTAssertFalse(bare.contains("|| true; }"), bare)
+        XCTAssertTrue(bare.contains(#"{ cd -- "${HOME}" 2>/dev/null || true; }"#), bare)
         XCTAssertTrue(bare.contains(exec), bare)
     }
 

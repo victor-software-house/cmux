@@ -714,6 +714,7 @@ struct SessionRestorableAgentSnapshot: Codable, Sendable {
         fileManager: FileManager = .default,
         temporaryDirectory: URL = FileManager.default.temporaryDirectory
     ) -> String? {
+        let savedReturnWorkingDirectory = workingDirectory ?? launchCommand?.workingDirectory
         guard let command = resumeCommand,
               let scriptURL = AgentResumeScriptStore.writeLauncherScript(
                   command: command,
@@ -722,11 +723,13 @@ struct SessionRestorableAgentSnapshot: Codable, Sendable {
                   fileManager: fileManager,
                   temporaryDirectory: temporaryDirectory,
                   returnToLoginShell: true,
-                  // Match the resume command's own cd: agents with an `.ignore` cwd policy resume from
-                  // the current directory (no cd), so the post-exit shell must not force the launch dir.
+                  // Match only the resume command's own cd: `.ignore` agents resume from the
+                  // current directory, but the outer post-exit shell still returns to the saved
+                  // session directory below.
                   workingDirectory: registration?.cwd == .ignore
                       ? nil
-                      : (workingDirectory ?? launchCommand?.workingDirectory)
+                      : savedReturnWorkingDirectory,
+                  fallbackWorkingDirectory: savedReturnWorkingDirectory
               ) else {
             return nil
         }
@@ -798,7 +801,8 @@ private enum AgentResumeScriptStore {
         fileManager: FileManager,
         temporaryDirectory: URL,
         returnToLoginShell: Bool = false,
-        workingDirectory: String? = nil
+        workingDirectory: String? = nil,
+        fallbackWorkingDirectory: String? = nil
     ) -> URL? {
         let directoryURL = temporaryDirectory.appendingPathComponent(directoryName, isDirectory: true)
         do {
@@ -822,7 +826,8 @@ private enum AgentResumeScriptStore {
             if returnToLoginShell {
                 lines.append(contentsOf: TerminalStartupReturnShellScript.commandThenReturnLines(
                     command: command,
-                    workingDirectory: workingDirectory
+                    workingDirectory: workingDirectory,
+                    fallbackWorkingDirectory: fallbackWorkingDirectory
                 ))
             } else {
                 lines.append(command)

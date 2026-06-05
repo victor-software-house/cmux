@@ -418,7 +418,8 @@ nonisolated struct SurfaceResumeBindingSnapshot: Codable, Equatable, Sendable {
 
     func startupCommandWithLauncherScript(
         fileManager: FileManager = .default,
-        temporaryDirectory: URL = FileManager.default.temporaryDirectory
+        temporaryDirectory: URL = FileManager.default.temporaryDirectory,
+        returnWorkingDirectory: String? = nil
     ) -> String? {
         guard let inlineInput = inlineStartupInput,
               let scriptURL = SurfaceResumeBindingScriptStore.writeLauncherScript(
@@ -426,7 +427,8 @@ nonisolated struct SurfaceResumeBindingSnapshot: Codable, Equatable, Sendable {
                   binding: self,
                   fileManager: fileManager,
                   temporaryDirectory: temporaryDirectory,
-                  returnToLoginShell: true
+                  returnToLoginShell: true,
+                  returnWorkingDirectory: returnWorkingDirectory
               ) else {
             return nil
         }
@@ -1280,7 +1282,11 @@ nonisolated enum TerminalStartupReturnShellScript {
         #"fi"#,
     ]
 
-    static func commandThenReturnLines(command: String, workingDirectory: String? = nil) -> [String] {
+    static func commandThenReturnLines(
+        command: String,
+        workingDirectory: String? = nil,
+        fallbackWorkingDirectory: String? = nil
+    ) -> [String] {
         let quotedCommand = TerminalStartupShellQuoting.singleQuoted(command)
         var lines = [
             shellLine,
@@ -1293,13 +1299,23 @@ nonisolated enum TerminalStartupReturnShellScript {
         // The resume command's `cd` runs inside the child shell above, so after the resumed agent
         // exits the outer login shell would otherwise land in this script's launch cwd (the surface
         // default), not the session's directory. Return the outer shell to the session's working
-        // directory so killing a resumed agent leaves you where the session lived.
-        if let workingDirectory, !workingDirectory.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let quotedDirectory = TerminalStartupShellQuoting.singleQuoted(workingDirectory)
+        // directory when possible, or HOME when no persisted directory survived.
+        if let returnWorkingDirectory = normalized(workingDirectory) ?? normalized(fallbackWorkingDirectory) {
+            let quotedDirectory = TerminalStartupShellQuoting.singleQuoted(returnWorkingDirectory)
             lines.append(#"{ cd -- \#(quotedDirectory) 2>/dev/null || true; }"#)
+        } else {
+            lines.append(#"{ cd -- "${HOME}" 2>/dev/null || true; }"#)
         }
         lines.append(#"exec -l "$_cmux_resume_shell""#)
         return lines
+    }
+
+    private static func normalized(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else {
+            return nil
+        }
+        return trimmed
     }
 }
 
@@ -1312,7 +1328,8 @@ private enum SurfaceResumeBindingScriptStore {
         binding: SurfaceResumeBindingSnapshot,
         fileManager: FileManager,
         temporaryDirectory: URL,
-        returnToLoginShell: Bool = false
+        returnToLoginShell: Bool = false,
+        returnWorkingDirectory: String? = nil
     ) -> URL? {
         let directoryURL = temporaryDirectory.appendingPathComponent(directoryName, isDirectory: true)
         do {
@@ -1332,7 +1349,8 @@ private enum SurfaceResumeBindingScriptStore {
             if returnToLoginShell {
                 lines.append(contentsOf: TerminalStartupReturnShellScript.commandThenReturnLines(
                     command: inlineInput,
-                    workingDirectory: binding.cwd
+                    workingDirectory: binding.cwd,
+                    fallbackWorkingDirectory: returnWorkingDirectory
                 ))
             } else {
                 lines.append(inlineInput)
