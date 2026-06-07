@@ -4823,6 +4823,76 @@ final class CLINotifyProcessIntegrationRegressionTests: XCTestCase {
         XCTAssertTrue(row["tab_title"] is NSNull)
     }
 
+    func testIdentifyUsesImplicitSurfaceWithoutStaleWorkspace() throws {
+        let cliPath = try bundledCLIPath()
+        let socketPath = makeSocketPath("identify-surface-only")
+        let listenerFD = try bindUnixSocket(at: socketPath)
+        let state = MockSocketServerState()
+        let staleWorkspaceId = "11111111-1111-1111-1111-111111111111"
+        let currentWorkspaceId = "22222222-2222-2222-2222-222222222222"
+        let currentSurfaceId = "33333333-3333-3333-3333-333333333333"
+
+        defer {
+            Darwin.close(listenerFD)
+            unlink(socketPath)
+        }
+
+        let serverHandled = startMockServer(listenerFD: listenerFD, state: state) { line in
+            guard let payload = self.jsonObject(line),
+                  let id = payload["id"] as? String,
+                  let method = payload["method"] as? String else {
+                return self.malformedRequestResponse(raw: line)
+            }
+
+            switch method {
+            case "system.identify":
+                let params = payload["params"] as? [String: Any] ?? [:]
+                let caller = params["caller"] as? [String: Any] ?? [:]
+                XCTAssertNil(caller["workspace_id"], "Stable surface identity must not be constrained by stale CMUX_WORKSPACE_ID")
+                XCTAssertEqual(caller["surface_id"] as? String, currentSurfaceId)
+                return self.v2Response(
+                    id: id,
+                    ok: true,
+                    result: [
+                        "focused": NSNull(),
+                        "caller": [
+                            "workspace_id": currentWorkspaceId,
+                            "surface_id": currentSurfaceId,
+                        ],
+                    ]
+                )
+            default:
+                return self.v2Response(id: id, ok: false, error: ["code": "unexpected", "message": "unexpected method: \(method)"])
+            }
+        }
+
+        var environment = ProcessInfo.processInfo.environment
+        environment["CMUX_SOCKET_PATH"] = socketPath
+        environment["CMUX_WORKSPACE_ID"] = staleWorkspaceId
+        environment["CMUX_SURFACE_ID"] = currentSurfaceId
+        environment["CMUX_CLI_SENTRY_DISABLED"] = "1"
+        environment["CMUX_CLAUDE_HOOK_SENTRY_DISABLED"] = "1"
+
+        let result = runProcess(
+            executablePath: cliPath,
+            arguments: ["identify", "--id-format", "uuids"],
+            environment: environment,
+            timeout: 5
+        )
+
+        wait(for: [serverHandled], timeout: 5)
+        XCTAssertFalse(result.timedOut, result.stderr)
+        XCTAssertEqual(result.status, 0, result.stderr)
+        let output = try XCTUnwrap(jsonObject(result.stdout))
+        let caller = try XCTUnwrap(output["caller"] as? [String: Any])
+        XCTAssertEqual(caller["workspace_id"] as? String, currentWorkspaceId)
+        XCTAssertEqual(caller["surface_id"] as? String, currentSurfaceId)
+        XCTAssertEqual(
+            state.commands.compactMap { self.jsonObject($0)?["method"] as? String },
+            ["system.identify"]
+        )
+    }
+
     func testCodexPromptSubmitRebindsRestoredSessionToCurrentCallerSurface() throws {
         let cliPath = try bundledCLIPath()
         let socketPath = makeSocketPath("codex-rebind")

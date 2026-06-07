@@ -3664,14 +3664,15 @@ struct CMUXCLI {
             let includeCaller = !hasFlag(commandArgs, name: "--no-caller")
             if includeCaller {
                 let idWsFlag = optionValue(commandArgs, name: "--workspace")
-                let workspaceArg = idWsFlag ?? (effectiveWindowRaw == nil ? ProcessInfo.processInfo.environment["CMUX_WORKSPACE_ID"] : nil)
                 let surfaceArg = optionValue(commandArgs, name: "--surface") ?? (idWsFlag == nil && effectiveWindowRaw == nil ? ProcessInfo.processInfo.environment["CMUX_SURFACE_ID"] : nil)
+                let implicitSurfaceIsStable = idWsFlag == nil && effectiveWindowRaw == nil && surfaceArg.map { isUUID($0) || isHandleRef($0) } == true
+                let workspaceArg = idWsFlag ?? (effectiveWindowRaw == nil && !implicitSurfaceIsStable ? ProcessInfo.processInfo.environment["CMUX_WORKSPACE_ID"] : nil)
                 if workspaceArg != nil || surfaceArg != nil {
                     let workspaceId = try normalizeWorkspaceHandle(
                         workspaceArg,
                         client: client,
                         windowHandle: targetWindow,
-                        allowCurrent: surfaceArg != nil
+                        allowCurrent: surfaceArg != nil && !implicitSurfaceIsStable
                     )
                     var caller: [String: Any] = [:]
                     if let workspaceId {
