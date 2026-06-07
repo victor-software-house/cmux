@@ -10586,10 +10586,23 @@ class TerminalController {
         params: [String: Any],
         workspace: Workspace
     ) -> (surfaceId: UUID?, error: V2CallResult?) {
-        if let surfaceId = v2UUID(params, "surface_id") ?? v2UUID(params, "tab_id") {
+        if v2HasNonNullParam(params, "surface_id") || v2HasNonNullParam(params, "tab_id") {
+            guard let surfaceId = v2UUID(params, "surface_id") ?? v2UUID(params, "tab_id") else {
+                let key = v2HasNonNullParam(params, "surface_id") ? "surface_id" : "tab_id"
+                return (
+                    nil,
+                    .err(code: "not_found", message: "Surface not found", data: [key: v2RawString(params, key) ?? ""])
+                )
+            }
             return (surfaceId, nil)
         }
-        if let paneId = v2UUID(params, "pane_id") {
+        if v2HasNonNullParam(params, "pane_id") {
+            guard let paneId = v2UUID(params, "pane_id") else {
+                return (
+                    nil,
+                    .err(code: "not_found", message: "Pane not found", data: ["pane_id": v2RawString(params, "pane_id") ?? ""])
+                )
+            }
             guard let pane = workspace.bonsplitController.allPaneIds.first(where: { $0.id == paneId }) else {
                 return (
                     nil,

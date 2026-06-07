@@ -1372,6 +1372,54 @@ final class TerminalControllerSocketSecurityTests: XCTestCase {
         )
     }
 
+    func testBrowserExplicitStaleTargetsDoNotFallBackToFocusedBrowser() throws {
+        let defaults = UserDefaults.standard
+        let previousBrowserDisabled = defaults.object(forKey: BrowserAvailabilitySettings.disabledKey)
+        BrowserAvailabilitySettings.setDisabled(false)
+        defer {
+            if let previousBrowserDisabled {
+                defaults.set(previousBrowserDisabled, forKey: BrowserAvailabilitySettings.disabledKey)
+            } else {
+                defaults.removeObject(forKey: BrowserAvailabilitySettings.disabledKey)
+            }
+            TerminalController.shared.setActiveTabManager(nil)
+        }
+
+        let manager = TabManager()
+        let workspace = try XCTUnwrap(manager.selectedWorkspace)
+        let pane = try XCTUnwrap(workspace.bonsplitController.allPaneIds.first)
+        let browserPanel = try XCTUnwrap(workspace.newBrowserSurface(
+            inPane: pane,
+            focus: true,
+            creationPolicy: .restoration
+        ))
+        XCTAssertEqual(workspace.focusedPanelId, browserPanel.id)
+        TerminalController.shared.setActiveTabManager(manager)
+
+        let staleTargets: [(key: String, value: String, message: String)] = [
+            ("surface_id", "surface:999", "Surface not found"),
+            ("tab_id", "tab:999", "Surface not found"),
+            ("pane_id", "pane:999", "Pane not found")
+        ]
+
+        for target in staleTargets {
+            let response = try handleV2Request(
+                method: "browser.get.title",
+                params: [
+                    "workspace_id": workspace.id.uuidString,
+                    target.key: target.value
+                ]
+            )
+
+            XCTAssertEqual(response["ok"] as? Bool, false, "Unexpected JSON-RPC response: \(response)")
+            let error = try XCTUnwrap(response["error"] as? [String: Any], "Unexpected JSON-RPC response: \(response)")
+            XCTAssertEqual(error["code"] as? String, "not_found")
+            XCTAssertEqual(error["message"] as? String, target.message)
+            let data = try XCTUnwrap(error["data"] as? [String: Any], "Expected error data payload")
+            XCTAssertEqual(data[target.key] as? String, target.value)
+        }
+    }
+
     func testBrowserOpenSplitDoesNotExternallyOpenDiffViewerWhenBrowserDisabled() throws {
         let defaults = UserDefaults.standard
         let previousBrowserDisabled = defaults.object(forKey: BrowserAvailabilitySettings.disabledKey)
